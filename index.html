@@ -1710,6 +1710,7 @@
 
         function buildSmartSlotsFromCatalog(catalog) {
             const distributedPrizes = expandCatalogWithAntiClustering(catalog);
+            const nowTs = Date.now();
             return distributedPrizes.map((p, idx) => ({
                 number: idx + 1,
                 prizeId: p.prizeId,
@@ -1719,6 +1720,8 @@
                 claimed: false,
                 winnerName: '',
                 claimedAt: '',
+                claimedTimestamp: 0,
+                slotUpdatedAt: nowTs,
                 delivered: false,
                 authCode: ''
             }));
@@ -2411,6 +2414,7 @@
 
             // Registra a escolha oficial do vendedor
             const now = new Date();
+            const nowTs = Date.now();
             const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
             const padNum = String(chosenNum).padStart(2, '0');
             const randHash = Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -2418,7 +2422,8 @@
             targetSlot.claimed = true;
             targetSlot.winnerName = playerName;
             targetSlot.claimedAt = timeStr;
-            targetSlot.claimedTimestamp = Date.now();
+            targetSlot.claimedTimestamp = nowTs;
+            targetSlot.slotUpdatedAt = nowTs;
             targetSlot.delivered = false;
             targetSlot.authCode = `ALARES-${padNum}-${randHash}`;
 
@@ -2842,15 +2847,24 @@
                                     <span class="px-2.5 py-1 rounded-xl bg-indigo-600 text-white font-display font-black text-xs">${g.items.length}x</span>
                                     <strong class="font-display font-black text-sm text-slate-900 dark:text-white">${g.name}</strong>
                                 </div>
-                                <button onclick="toggleAllPersonDeliveries('${encodedName}')"
-                                    class="px-3 py-1 rounded-xl text-xs font-bold cursor-pointer ${allDelivered ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'}">
-                                    ${allDelivered ? '✅ Todos Entregues' : '📦 Marcar Todos Entregues'}
-                                </button>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <button type="button" onclick="toggleAllPersonDeliveries('${encodedName}')"
+                                        class="px-3 py-1 rounded-xl text-xs font-bold cursor-pointer ${allDelivered ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'}">
+                                        ${allDelivered ? '✅ Todos Entregues' : '📦 Marcar Todos Entregues'}
+                                    </button>
+                                    <button type="button" onclick="removePersonAllClaims('${encodedName}')"
+                                        class="px-3 py-1 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1 cursor-pointer transition">
+                                        <i class="ph-bold ph-trash"></i>
+                                        <span>Excluir Participante</span>
+                                    </button>
+                                </div>
                             </div>
                             <div class="flex flex-wrap gap-2">
                                 ${g.items.map(item => `
-                                    <span class="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold">
-                                        #${String(item.number).padStart(2, '0')} • ${item.icon} ${item.prizeName}
+                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold">
+                                        <span>#${String(item.number).padStart(2, '0')} • ${item.icon} ${item.prizeName}</span>
+                                        <button type="button" onclick="reopenClaimedSlot(${item.number})" title="Excluir este número"
+                                            class="ml-1 text-rose-500 hover:text-rose-700 font-black cursor-pointer">×</button>
                                     </span>
                                 `).join('')}
                             </div>
@@ -2875,13 +2889,14 @@
                             </div>
                         </div>
                         <div class="flex items-center gap-2">
-                            <button onclick="toggleDeliveryStatus(${s.number})"
+                            <button type="button" onclick="toggleDeliveryStatus(${s.number})"
                                 class="px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition ${s.delivered ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-amber-100 text-amber-900 border border-amber-300'}">
                                 ${s.delivered ? '✅ Entregue' : '⏳ Pendente (Marcar)'}
                             </button>
-                            <button onclick="reopenClaimedSlot(${s.number})" title="Cancelar esta jogada e reabrir o número"
-                                class="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-xs font-bold cursor-pointer">
+                            <button type="button" onclick="reopenClaimedSlot(${s.number})" title="Excluir participante deste número e liberar o número novamente"
+                                class="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-xs font-bold flex items-center gap-1 cursor-pointer transition">
                                 <i class="ph-bold ph-trash"></i>
+                                <span>Excluir</span>
                             </button>
                         </div>
                     </div>
@@ -2893,6 +2908,7 @@
             const slot = appState.slots.find(s => s.number === number);
             if (!slot) return;
             slot.delivered = !slot.delivered;
+            slot.slotUpdatedAt = Date.now();
             saveStateToCloud();
             refreshAllUI();
         };
@@ -2901,22 +2917,58 @@
             const targetName = decodeURIComponent(encodedName).trim().toLowerCase();
             const personSlots = appState.slots.filter(s => s.claimed && s.winnerName.trim().toLowerCase() === targetName);
             const allDone = personSlots.every(s => s.delivered);
-            personSlots.forEach(s => { s.delivered = !allDone; });
+            const nowTs = Date.now();
+            personSlots.forEach(s => {
+                s.delivered = !allDone;
+                s.slotUpdatedAt = nowTs;
+            });
             saveStateToCloud();
             refreshAllUI();
         };
 
         window.reopenClaimedSlot = function(number) {
-            const slot = appState.slots.find(s => s.number === number);
+            const slot = appState.slots.find(s => s.number === Number(number));
             if (!slot) return;
+            const removedWinner = slot.winnerName || 'Participante';
+            const nowTs = Date.now();
+
             slot.claimed = false;
             slot.winnerName = '';
             slot.claimedAt = '';
+            slot.claimedTimestamp = 0;
+            slot.slotUpdatedAt = nowTs;
             slot.delivered = false;
             slot.authCode = '';
+
+            // Reembaralha os números livres para que ninguém saiba qual prêmio estava neste número
+            reshuffleUnclaimedSlots();
+
             saveStateToCloud();
             refreshAllUI();
-            showToast(`🔄 Número #${String(number).padStart(2, '0')} reaberto e disponível novamente!`);
+            showToast(`🗑️ ${removedWinner} removido e número #${String(number).padStart(2, '0')} liberado!`);
+        };
+
+        window.removePersonAllClaims = function(encodedName) {
+            const targetName = decodeURIComponent(encodedName).trim().toLowerCase();
+            const personSlots = appState.slots.filter(s => s.claimed && (s.winnerName || '').trim().toLowerCase() === targetName);
+            if (personSlots.length === 0) return;
+
+            const displayName = personSlots[0].winnerName;
+            const nowTs = Date.now();
+            personSlots.forEach(slot => {
+                slot.claimed = false;
+                slot.winnerName = '';
+                slot.claimedAt = '';
+                slot.claimedTimestamp = 0;
+                slot.slotUpdatedAt = nowTs;
+                slot.delivered = false;
+                slot.authCode = '';
+            });
+
+            reshuffleUnclaimedSlots();
+            saveStateToCloud();
+            refreshAllUI();
+            showToast(`🗑️ Participante ${displayName} excluído e ${personSlots.length} número(s) liberado(s)!`);
         };
 
         window.exportWinnersWhatsApp = function() {
@@ -3051,7 +3103,7 @@
             appState.prizeCatalog = JSON.parse(JSON.stringify(validItems));
             appState.slots = buildSmartSlotsFromCatalog(appState.prizeCatalog);
             appState.shuffleCount = 1;
-            appState.resetVersion = (appState.resetVersion || 1) + 1;
+            appState.resetVersion = Date.now();
             saveStateToCloud();
             refreshAllUI();
             showToast(`✅ Sorteio reiniciado com ${total} prêmios distribuídos!`);
@@ -3241,7 +3293,7 @@
         window.confirmHardResetDraw = function() {
             appState.slots = buildSmartSlotsFromCatalog(appState.prizeCatalog);
             appState.shuffleCount = 1;
-            appState.resetVersion = (appState.resetVersion || 1) + 1;
+            appState.resetVersion = Date.now();
             appState.securityLogs = [];
             window.closeResetConfirmModal();
             saveStateToCloud();
@@ -3561,21 +3613,33 @@
 
                 const remoteResetVer = remoteData.resetVersion || 1;
                 const localResetVer = appState.resetVersion || 1;
-                let hasUnsyncedLocalClaim = false;
+
+                // Ignora snapshot antigo caso um reset local mais recente tenha acabado de ocorrer
+                if (localResetVer > remoteResetVer) {
+                    pendingCloudSave = true;
+                    return;
+                }
+
+                let hasUnsyncedLocalChange = false;
                 const newlyClaimedByEmployee = [];
 
                 if (remoteResetVer === localResetVer && Array.isArray(appState.slots) && appState.slots.length === remoteSlots.length) {
                     remoteSlots.forEach((rSlot, idx) => {
                         const lSlot = appState.slots[idx];
-                        if (rSlot && rSlot.claimed && lSlot && !lSlot.claimed) {
+                        if (!lSlot || !rSlot) return;
+
+                        const localSlotTime = lSlot.slotUpdatedAt || lSlot.claimedTimestamp || 0;
+                        const remoteSlotTime = rSlot.slotUpdatedAt || rSlot.claimedTimestamp || 0;
+
+                        // Detecta se um funcionário acabou de escolher um número novo na nuvem
+                        if (rSlot.claimed && !lSlot.claimed && remoteSlotTime >= localSlotTime) {
                             newlyClaimedByEmployee.push(rSlot);
                         }
-                    });
 
-                    appState.slots.forEach((localSlot, idx) => {
-                        if (localSlot.claimed && !remoteSlots[idx]?.claimed) {
-                            remoteSlots[idx] = { ...localSlot };
-                            hasUnsyncedLocalClaim = true;
+                        // Se a alteração local (ex: exclusão pelo Admin ou jogada local) for mais recente que a nuvem, preserva a ação local!
+                        if (localSlotTime > remoteSlotTime) {
+                            remoteSlots[idx] = { ...lSlot };
+                            hasUnsyncedLocalChange = true;
                         }
                     });
                 }
@@ -3606,8 +3670,8 @@
                     });
                 }
 
-                if (hasUnsyncedLocalClaim) {
-                    pendingCloudSave = true;
+                if (hasUnsyncedLocalChange) {
+                    saveStateToCloud();
                 }
             } catch (err) {
                 console.error('Erro ao aplicar estado remoto:', err);
